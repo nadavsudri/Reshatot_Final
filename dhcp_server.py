@@ -56,7 +56,7 @@ def run_dhcp_server():
                         print(f"Sorry MAC {client_mac}, no more IPs available!")
                         continue
 
-                    offer_packet = create_offer_packet(xid, offered_ip, mac_padded)     #dreating the offer packet
+                    offer_packet = create_offer_packet(xid, offered_ip, mac_padded)     #creating the offer packet
                     server_socket.sendto(offer_packet, client_address)                  #sending the client the offer
                     print(f"Sent DHCP Offer ({offered_ip}) back to client!\n")
                 elif msg_type == 3:
