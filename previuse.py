@@ -43,47 +43,56 @@ def run_dhcp_client():
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # the ability to broadcast 
         client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        # The client has to listen to port 68 so it hears the relay
+        client_socket.bind(('0.0.0.0', 68))
+        client_socket.settimeout(5.0)   # SO the program will not stay stuck forever is case something goes wrong
     except OSError as e:
         print(f"CRITICAL ERROR: Failed to create or configure socket. Details: {e}")
         return
     # Tending the request (broadcast), using the 6767 port so it runs on any computer
     client_socket.sendto(final_packet, ('<broadcast>', 67))
     print("Waiting for DHCP Offer...")
-    # Response_data = buffer, server_address = IP of client + port
-    response_data, server_address = client_socket.recvfrom(1024) # Returns a tuple of 2 elements
-    if len(response_data) < 243:
-        print("Received a packet that is too short. Ignoring.")
-        client_socket.close()
-        return
-    print(f"Received response from {server_address}!")
-    
-    # By the method parse_offer_packet we'll exstract the xid & offered IP 
-    received_xid, offered_ip = parse_offer_packet(response_data)
-    # check if the respond really belongs to this client by comparing the xids
-    if received_xid == XID:
-        print(f"XID match! The server offered us IP: {offered_ip}")
-        # Buileding the Request
-        #The server's IP is in the 0 index in the server_address tuple
-        server_ip_str = server_address[0] 
-        request_packet = create_request_packet(XID, offered_ip, server_ip_str, mac_bytes)
-        #sending to all other servers by broadcast that we picked this server
-        client_socket.sendto(request_packet, ('<broadcast>', 6767))
-        print(f"Sent DHCP Request for IP {offered_ip} to server {server_ip_str}...")
-        print("Waiting for final DHCP ACK...")
-        # Receiving ack - part 4
-        ack_data, ack_address = client_socket.recvfrom(1024)
-        if len(ack_data) < 243:
+
+    try:
+        # Response_data = buffer, server_address = IP of client + port
+        response_data, server_address = client_socket.recvfrom(1024) # Returns a tuple of 2 elements
+        if len(response_data) < 243:
             print("Received a packet that is too short. Ignoring.")
             client_socket.close()
             return
-        ack_xid, final_ip = parse_offer_packet(ack_data)
-        if ack_xid == XID:
-            print(f"Received DHCP ACK from {ack_address[0]}.")
-            print(f"My new IP address is officially: {final_ip}")
+        print(f"Received response from {server_address}!")
+        
+        # By the method parse_offer_packet we'll exstract the xid & offered IP 
+        received_xid, offered_ip = parse_offer_packet(response_data)
+        # check if the respond really belongs to this client by comparing the xids
+        if received_xid == XID:
+            print(f"XID match! The server offered us IP: {offered_ip}")
+            # Buileding the Request
+            #The server's IP is in the 0 index in the server_address tuple
+            server_ip_str = server_address[0] 
+            request_packet = create_request_packet(XID, offered_ip, server_ip_str, mac_bytes)
+            #sending to all other servers by broadcast that we picked this server
+            client_socket.sendto(request_packet, ('<broadcast>', 67))
+            print(f"Sent DHCP Request for IP {offered_ip} to server {server_ip_str}...")
+            print("Waiting for final DHCP ACK...")
+            # Receiving ack - part 4
+            ack_data, ack_address = client_socket.recvfrom(1024)
+            if len(ack_data) < 243:
+                print("Received a packet that is too short. Ignoring.")
+                client_socket.close()
+                return
+            ack_xid, final_ip = parse_offer_packet(ack_data)
+            if ack_xid == XID:
+                print(f"Received DHCP ACK from {ack_address[0]}.")
+                print(f"My new IP address is officially: {final_ip}")
+            else:
+                print("Received an ACK, but the XID didn't match.")
         else:
-            print("Received an ACK, but the XID didn't match.")
-    else:
-        print(f"XID mismatch! Expected {XID} but got {received_xid}. Ignoring packet.")
+            print(f"XID mismatch! Expected {XID} but got {received_xid}. Ignoring packet.")
+    except socket.timeout:
+        # Ckeching the timer
+        print("\n[!] Timeout: The server (or relay) did not respond within 5 seconds.")
+        print("Closing the connection. Please check if the server/relay is running.")
     client_socket.close()
 
 
@@ -149,3 +158,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

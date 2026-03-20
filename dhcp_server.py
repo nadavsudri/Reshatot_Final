@@ -11,7 +11,7 @@ def run_dhcp_server():
         return
     #'0.0.0.0' means - listen to all broadcast requests in the network
     try:
-        server_socket.bind(('0.0.0.0', 6767))
+        server_socket.bind(('0.0.0.0', 67))
         print("DHCP Server is up and listening on port 6767...")
     except OSError:
         print("CRITICAL ERROR: Port 6767 is already in use. Please close other instances and try again.")
