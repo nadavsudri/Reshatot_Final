@@ -12,11 +12,12 @@ frame_buffer = queue.Queue(maxsize=30)
 def download_frames(video_name):
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_address = ('127.0.0.1', 8080)
+    client_socket.settimeout(2.0)
     current_quality = "Low"
+    frame_num = 1    # In order to keep up with the numbers of frames that where sent
 
     # 1. The client requests a high-quality frame
     while True:
-        frame_number = 0     # In order to keep up with the numbers of frames that where sent
         # Separate the request elements 
         request_msg = f"{video_name} {current_quality} {frame_num}\n"
         print(f"Requesting: {request_msg}")
@@ -63,20 +64,20 @@ def download_frames(video_name):
                 # 5. Check if we received all chunks successfully
                 if len(received_chunks) == total_chunks:
                     print("\n[+] All chunks received! Assembling image...")
-                    
                     # Send the last ACK a few more times just in case 
                     # it gets lost, preventing the server from a timeout loop.
                     for _ in range(5):
                         client_socket.sendto(ack_packet, server_address)
-                    break
+                    break # Break inner loop, move to image assembly
                     
             except socket.timeout:
                 print("[-] Error: Timeout waiting for chunks.")
-                break
+                break # Break inner loop due to timeout, move to step 6 (which will handle the failure)
         # END OF RUDP LOGIC 
 
         # 6. Image Assembly
-        if len(received_chunks) == total_chunks:
+        # Only assemble if we actually got all chunks!
+        if len(received_chunks) == total_chunks and total_chunks > 0:
             full_data = b''
             for i in range(total_chunks):
                 full_data += received_chunks[i]
@@ -91,12 +92,11 @@ def download_frames(video_name):
             if img is not None:
                 ending_time = time.time()
 
-                #the time it took to deliver a low quality frame
+                # the time it took to deliver the current frame
                 frame_time = ending_time - starting_time
                 
                 # Push img to the queue
                 frame_buffer.put(img)
-                frame_number += 1
 
                 if frame_time < 0.05:     # if the net is super fast
                     current_quality = "High"
@@ -107,6 +107,17 @@ def download_frames(video_name):
                     print("Network is slow. dropping quality to low for next frame")
             else:
                 print("[-] Error: Failed to decode the assembled image.")
+            
+            # Increment frame number for the next iteration of the while loop
+            frame_num += 1
+
+        else:
+            # If we didn't get all chunks, it means the server stopped sending (video ended)
+            print("[*] Video ended. Exiting download loop.")
+            break # Breaks the outer while True loop!
+
+    # Send poison pill to the player thread
+    frame_buffer.put(None)
 
 
 # This method is in charge of pulling the frames we downloaded to the buffer and show them
@@ -120,5 +131,3 @@ def play_video():
     # after the video is over, close the window
     print("Finished playing video!")
     cv2.destroyAllWindows()
-
-    

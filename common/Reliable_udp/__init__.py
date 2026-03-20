@@ -25,6 +25,7 @@ class ReliableUDP:
     ## start of connection (3way handshake) - initiator side
     def connect(self, ip, port):
         self.sock.connect((ip, port))
+
         ## send SIN message
         self.sock.send("SIN".encode())
         ##recive SIN/ACK
