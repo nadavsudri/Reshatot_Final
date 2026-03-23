@@ -104,7 +104,7 @@ def download_frames(video_name):
                     current_quality = "Medium"
                 else:
                     current_quality = "Low"
-                    print("Network is slow. dropping quality to low for next frame")
+                    print("Network is slow. dropping quality to low for next frame\n")
             else:
                 print("[-] Error: Failed to decode the assembled image.")
             
@@ -122,12 +122,40 @@ def download_frames(video_name):
 
 # This method is in charge of pulling the frames we downloaded to the buffer and show them
 def play_video():
+
+    # This tow lines reasure that the video window will show on top of all the other windows.
+    # The first line orders to allocate a real memory area to the video window and opens a normal window
+    # The second line orders to always show this window no metter what - sets the WND_PROP_TOPMOST to 1 = true 
+    cv2.namedWindow("My Dash Player", cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty("My Dash Player", cv2.WND_PROP_TOPMOST, 1)
+
+    print("\nBuffering video... Please wait a few seconds.\n")
+    # Buffering at least 20 frames so the video will run smoothly
+    while frame_buffer.qsize() < 30:
+        time.sleep(0.1)
+    print("Buffering complete! Enjoy the movie.\n")
     while True:
         img = frame_buffer.get()
         if img is None:
             break
         cv2.imshow("My Dash Player", img)
-        cv2.waitKey(33)
+        # Wait for 33 miliseconds between each frame. if q is pressed - stop and go out
+        if cv2.waitKey(33) & 0xFF == ord('q'):
+            break
     # after the video is over, close the window
-    print("Finished playing video!")
+    print("Finished playing video!\n")
     cv2.destroyAllWindows()
+
+def run_video_client():
+    video_name = input("Which video would you like to play?\n")
+    # We want the download_frames & run_video_client to run concurrently so we use threading
+    downloader_thread = threading.Thread(target=download_frames, args=(video_name,))
+    
+    # Start running the download method, the compiler will keep reading the next lines run
+    downloader_thread.start()
+
+    play_video()
+    print("Client closed successfully.\n")
+
+if __name__ == "__main__":
+    run_video_client()
