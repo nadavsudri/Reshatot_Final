@@ -1,8 +1,19 @@
 import socket
 import struct
 
+# Finding the local IP in the net by sending something to google 
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80)) 
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception:
+        return "127.0.0.1"
+
 # Offer - part 2
-def run_dhcp_server(): 
+def run_dhcp_server(server_ip : str): 
     # Opening a UDP socket safely
     try:
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -12,13 +23,28 @@ def run_dhcp_server():
     #'0.0.0.0' means - listen to all broadcast requests in the network
     try:
         server_socket.bind(('0.0.0.0', 67))
-        print("DHCP Server is up and listening on port 6767...")
+        print("DHCP Server is up and listening on port 67...")
     except OSError:
-        print("CRITICAL ERROR: Port 6767 is already in use. Please close other instances and try again.")
+        print("CRITICAL ERROR: Port 67 is already in use. Please close other instances and try again.")
         server_socket.close()
         return
-
-    #creating IP addresses in the range 192.168.1.100 - 192.168.1.200
+    
+    # Asking for DNS IP address so the offer&ack packets will contain it
+    print("\n[*] Waiting for DNS Server to broadcast its IP...")
+    dns_ip = ""
+    while True:
+        packet_data, addr = server_socket.recvfrom(1024)
+        try:
+            # Tring to decode the massege to a text
+            msg = packet_data.decode('ascii')
+            if msg.startswith("I_AM_DNS"):
+                # If its the wanted massege, exstract DNS IP
+                dns_ip = msg.split()[1]
+                print(f"[+] Awesome! Found DNS Server at IP: {dns_ip}\n")
+                break  
+        except:
+            pass
+    # Creating IP addresses in the range 192.168.1.100 - 192.168.1.200
     ip_pool = [f"192.168.1.{i}" for i in range(100, 201)]
     leased_ips = {}                 #holds the used IP's
     server_socket.settimeout(1.0)   #so the power machine will sense the ctrl+c if pressed
@@ -56,7 +82,7 @@ def run_dhcp_server():
                         print(f"Sorry MAC {client_mac}, no more IPs available!")
                         continue
 
-                    offer_packet = create_offer_packet(xid, offered_ip, mac_padded)     #creating the offer packet
+                    offer_packet = create_offer_packet(xid, offered_ip, mac_padded, server_ip, dns_ip)     #creating the offer packet
                     server_socket.sendto(offer_packet, client_address)                  #sending the client the offer
                     print(f"Sent DHCP Offer ({offered_ip}) back to client!\n")
                 elif msg_type == 3:
@@ -64,7 +90,7 @@ def run_dhcp_server():
                     # Checking if the client is really in the list
                     if client_mac in leased_ips:
                         final_ip = leased_ips[client_mac]
-                        ack_packet = create_ack_packet(xid, final_ip, mac_padded)
+                        ack_packet = create_ack_packet(xid, final_ip, mac_padded, server_ip, dns_ip)
                         server_socket.sendto(ack_packet, client_address)
                         print(f"Sent DHCP ACK ({final_ip}) to client.\n")
                     else:
@@ -77,7 +103,7 @@ def run_dhcp_server():
         server_socket.close()
 
 
-def create_offer_packet(xid : int, offered_ip : str, client_mac_bytes : bytes) -> bytes:
+def create_offer_packet(xid : int, offered_ip : str, client_mac_bytes : bytes, server_ip : str, dns_ip : str) -> bytes:
     #header
     #basic data:
     OP = 2    # Respons = 2
@@ -93,7 +119,7 @@ def create_offer_packet(xid : int, offered_ip : str, client_mac_bytes : bytes) -
     #IP adresses:
     CIADDR = socket.inet_aton("0.0.0.0")    # Client IP
     YIADDR = socket.inet_aton(offered_ip)   # Offered ip
-    SIADDR = socket.inet_aton("127.0.0.1")  # Server IP
+    SIADDR = socket.inet_aton(server_ip)    # Server IP
     GIADDR = socket.inet_aton("0.0.0.0")    # Gateway IP
 
     CHADDR = client_mac_bytes
@@ -106,20 +132,24 @@ def create_offer_packet(xid : int, offered_ip : str, client_mac_bytes : bytes) -
     magic_cookie = b'\x63\x82\x53\x63'            # DHCP Magic Cookie (Identifies DHCP packet)       
     # !B B B = Type, Length, Value
     option_53 = struct.pack('!B B B', 53, 1, 2)   # DHCP Message Type (2 = offer)
+    # This option transfers the client the DNS IP
+    dns_id = socket.inet_aton(dns_ip)
+    option_6 = struct.pack('!B B 4s', 6, 4, dns_id)
+    # Tells the client it is the end of the options
     option_end = struct.pack('!B', 255)
     #we'll add subnet musk to the offer packet
     subnet_mask = socket.inet_aton("255.255.255.0")
     option_1 = struct.pack('!B B 4s', 1, 4, subnet_mask) 
-    #return the server identifier
-    server_id = socket.inet_aton("127.0.0.1")
+    # #return the server identifier
+    server_id = socket.inet_aton(server_ip)
     option_54 = struct.pack('!B B 4s', 54, 4, server_id)     
     #final packet assembly
-    final_packet = header + header_part2 + magic_cookie + option_53 + option_1 + option_54 + option_end
+    final_packet = header + header_part2 + magic_cookie + option_53 + option_1 + option_54 + option_6 + option_end
 
     return final_packet
 
 
-def create_ack_packet(xid : int, offered_ip : str, client_mac_bytes : bytes) -> bytes:
+def create_ack_packet(xid : int, offered_ip : str, client_mac_bytes : bytes, server_ip : str, dns_ip : str) -> bytes:
     #header
     #basic data:
     OP = 2    # Respons = 2
@@ -135,7 +165,7 @@ def create_ack_packet(xid : int, offered_ip : str, client_mac_bytes : bytes) -> 
     #IP adresses:
     CIADDR = socket.inet_aton("0.0.0.0")    # Client IP
     YIADDR = socket.inet_aton(offered_ip)   # Offered ip
-    SIADDR = socket.inet_aton("127.0.0.1")  # Server IP
+    SIADDR = socket.inet_aton(server_ip)    # Server IP
     GIADDR = socket.inet_aton("0.0.0.0")    # Gateway IP
 
     CHADDR = client_mac_bytes
@@ -148,22 +178,27 @@ def create_ack_packet(xid : int, offered_ip : str, client_mac_bytes : bytes) -> 
     magic_cookie = b'\x63\x82\x53\x63'            # DHCP Magic Cookie (Identifies DHCP packet)       
     # !B B B = Type, Length, Value
     option_53 = struct.pack('!B B B', 53, 1, 5)   # DHCP Message Type (5 = ack)
+    # This option transfers the client the DNS IP
+    dns_id = socket.inet_aton(dns_ip)
+    option_6 = struct.pack('!B B 4s', 6, 4, dns_id)
+    # Tells the client it is the end of the options
     option_end = struct.pack('!B', 255)
     # We'll add subnet musk to the ack packet
     subnet_mask = socket.inet_aton("255.255.255.0")
     option_1 = struct.pack('!B B 4s', 1, 4, subnet_mask) 
-    #return the server identifier
-    server_id = socket.inet_aton("127.0.0.1")
+    # #return the server identifier
+    server_id = socket.inet_aton(server_ip)
     option_54 = struct.pack('!B B 4s', 54, 4, server_id)     
     #final packet assembly
-    final_packet = header + header_part2 + magic_cookie + option_53 + option_1 + option_54 + option_end
+    final_packet = header + header_part2 + magic_cookie + option_53 + option_1 + option_54 + option_6 + option_end
 
     return final_packet
 
 
 def main():
     print("Starting DHCP server process...")
-    run_dhcp_server()
+    server_ip = get_local_ip()
+    run_dhcp_server(server_ip)
 
 if __name__ == "__main__":
     main()

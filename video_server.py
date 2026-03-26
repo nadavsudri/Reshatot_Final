@@ -3,11 +3,41 @@ import cv2
 import struct
 import math
 
+# Finding the local IP in the net by sending something to google 
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80)) 
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception:
+        return "127.0.0.1"
+
 # define the size of each piece to 4000
 CHUNK_SIZE = 4000 
 WINDOW_SIZE = 5      # the window size - hte amount of ckuncks we will send befor waiting for ACK
 TIMEOUT = 0.5        # timer - in case the ACK gets lost
-def run_video_server():
+
+
+def run_video_server(my_ip):
+
+    print(f"[*] Video Server starting up. My IP is: {my_ip}")
+    try:
+        register_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Give the operation system permission to broadcast
+        register_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        
+        # building the signing massege to DNS server
+        register_msg = f"REGISTER video.server.local {my_ip}"
+        
+        # Broadcasting throw port 53
+        register_sock.sendto(register_msg.encode('ascii'), ('255.255.255.255', 53))
+        register_sock.close()
+        print(f"[*] Successfully broadcasted registration to DNS: {register_msg}")
+    except Exception as e:
+        print(f"[-] Failed to register to DNS: {e}")
+
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_socket.bind(('0.0.0.0', 8080))
     print("RUDP Video Server is up and listening on port 8080...")
@@ -111,4 +141,5 @@ def run_video_server():
             print(f"[-] Error processing request: {e}")
 
 if __name__ == "__main__":
-    run_video_server()
+    my_ip = get_local_ip()
+    run_video_server(my_ip)

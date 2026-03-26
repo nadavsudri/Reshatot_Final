@@ -5,7 +5,18 @@ import socket , struct
 self_ip = socket.inet_aton("192.168.1.10")
 dns_data = {}
 
-##extracting the dns domain from the requst -> [12 bytes of header][domain]
+# Finding the local IP in the net by sending something to google 
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80)) 
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception:
+        return "127.0.0.1"
+
+##exstracting the dns domain from the requst -> [12 bytes of header][domain]
 def extract_domain_name(dns_domain, offset)-> str:
     labels = []
     while True:
@@ -19,15 +30,45 @@ def extract_domain_name(dns_domain, offset)-> str:
     return ".".join(labels),offset
     
 
-def run_dns_server():
+def run_dns_server(my_ip):
     
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # inconing dns request socket
     server_socket.bind(("0.0.0.0",53))
+
+    print(f"My IP is: {my_ip}")
     print("Listening on 53 for DNS requests")
+
+    try:
+        broadcast_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # This line gives the operation system permission send a broadcast massege 
+        broadcast_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        
+        # sending broadcast in port 67 - DHCP port
+        announce_msg = f"I_AM_DNS {my_ip}"
+        broadcast_sock.sendto(announce_msg.encode('ascii'), ('255.255.255.255', 67))
+        broadcast_sock.close()
+        print("[*] Automatically registered my IP to the DHCP server!")
+    except Exception as e:
+        print(f"[-] Failed to broadcast my IP: {e}")
 
     while True:
         try:
+
             packet_data, client_address = server_socket.recvfrom(1024)
+            
+            # Intercept registration broadcasts from other servers (like the Video Server) to dynamically 
+            # update the DNS records
+            if packet_data.startswith(b"REGISTER"):
+                msg_parts = packet_data.decode('ascii').split()
+                # The least length should be at least 3, if not - it could be coruppted or missing
+                if len(msg_parts) >= 3:
+                    domain_to_register = msg_parts[1]
+                    ip_to_register = msg_parts[2]
+                    # Inserting the server name & IP to DNS dict
+                    dns_data[domain_to_register] = ip_to_register
+                    print(f"[+] Server Registered: {domain_to_register} is now mapped to {ip_to_register}")
+                continue
+
             res = parse_dns_request(packet_data)
             res_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
             res_sock.sendto(res,client_address)
@@ -80,7 +121,8 @@ def extract_ip_from_response(data):
 
 def main():
     print("Starting DNS server process...")
-    run_dns_server()
+    my_ip = get_local_ip()
+    run_dns_server(my_ip)
 
 if __name__ == "__main__":
     main()
