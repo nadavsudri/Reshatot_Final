@@ -23,6 +23,7 @@ def run_dhcp_server(server_ip : str):
     #'0.0.0.0' means - listen to all broadcast requests in the network
     try:
         server_socket.bind(('0.0.0.0', 67))
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         print("DHCP Server is up and listening on port 67...")
     except OSError:
         print("CRITICAL ERROR: Port 67 is already in use. Please close other instances and try again.")
@@ -30,20 +31,22 @@ def run_dhcp_server(server_ip : str):
         return
     
     # Asking for DNS IP address so the offer&ack packets will contain it
-    print("\n[*] Waiting for DNS Server to broadcast its IP...")
+    print("\n[*] Looking for DNS Server...")
     dns_ip = ""
     while True:
-        packet_data, addr = server_socket.recvfrom(1024)
+        server_socket.sendto("WHO_IS_DNS".encode('ascii'), ('<broadcast>', 53))
+        server_socket.settimeout(2.0)
         try:
-            # Tring to decode the massege to a text
+            packet_data, addr = server_socket.recvfrom(1024)
             msg = packet_data.decode('ascii')
             if msg.startswith("I_AM_DNS"):
-                # If its the wanted massege, exstract DNS IP
                 dns_ip = msg.split()[1]
-                print(f"[+] Awesome! Found DNS Server at IP: {dns_ip}\n")
-                break  
-        except:
-            pass
+                print(f"[+] Found DNS Server at IP: {dns_ip}\n")
+                break
+        except socket.timeout:
+            print("[*] No DNS response, retrying...")
+            continue
+    server_socket.settimeout(1.0)
     # Creating IP addresses in the range 192.168.1.100 - 192.168.1.200
     ip_pool = [f"192.168.1.{i}" for i in range(100, 201)]
     leased_ips = {}                 #holds the used IP's

@@ -38,18 +38,18 @@ def run_dns_server(my_ip):
     print(f"My IP is: {my_ip}")
     print("Listening on 53 for DNS requests")
 
-    try:
-        broadcast_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # This line gives the operation system permission send a broadcast massege 
-        broadcast_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        
-        # sending broadcast in port 67 - DHCP port
-        announce_msg = f"I_AM_DNS {my_ip}"
-        broadcast_sock.sendto(announce_msg.encode('ascii'), ('255.255.255.255', 67))
-        broadcast_sock.close()
-        print("[*] Automatically registered my IP to the DHCP server!")
-    except Exception as e:
-        print(f"[-] Failed to broadcast my IP: {e}")
+    print("[*] Waiting for DHCP to ask for DNS...")
+    while True:
+        try:
+            packet_data, addr = server_socket.recvfrom(1024)
+            msg = packet_data.decode('ascii')
+            if msg.startswith("WHO_IS_DNS"):
+                response = f"I_AM_DNS {my_ip}"
+                server_socket.sendto(response.encode('ascii'), addr)
+                print(f"[*] Told DHCP my IP: {my_ip}")
+                break
+        except:
+            pass
 
     while True:
         try:
