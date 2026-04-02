@@ -13,7 +13,6 @@ def get_ip() -> tuple:
         sock.bind(('0.0.0.0', 68))
         sock.settimeout(5.0)
 
-
         # assembling the dhcp message ----> [request]
         OP    = 1
         HTYPE = 1
@@ -163,7 +162,6 @@ def look_for_domain(dns_ip: str, domain: str) -> str:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.settimeout(5.0)
-
     # sends DNS query, returns video server ip
     # header
     transaction_id = random.randint(0, 0xFFFF)
@@ -192,19 +190,15 @@ def look_for_domain(dns_ip: str, domain: str) -> str:
 
     return ip
 
-
 def connect_to_server(server_ip: str, choice: str) -> Transport:
     # opens socket, handshake, returns TCPTransport or RUDPTransport
     pass
-
 def download_frames(conn: Transport, video_name: str):
     # runs in a thread, requests frames, pushes to frame_buffer
     pass
-
 def play_video():
     # runs on main thread, drains frame_buffer, displays with cv2
     pass
-
 def main():
     (my_ip,dns_ip) = get_ip()
     
