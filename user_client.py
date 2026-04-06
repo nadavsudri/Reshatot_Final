@@ -193,12 +193,35 @@ def look_for_domain(dns_ip: str, domain: str) -> str:
 def connect_to_server(server_ip: str, choice: str) -> Transport:
     # opens socket, handshake, returns TCPTransport or RUDPTransport
     pass
-def download_frames(conn: Transport, video_name: str):
+def download_frames(conn: Transport, video_name: str, ):
     # runs in a thread, requests frames, pushes to frame_buffer
     pass
+
+# runs on main thread, drains frame_buffer, displays with cv2
 def play_video():
-    # runs on main thread, drains frame_buffer, displays with cv2
-    pass
+    # This tow lines reasure that the video window will show on top of all the other windows.
+    # The first line orders to allocate a real memory area to the video window and opens a normal window
+    # The second line orders to always show this window no metter what - sets the WND_PROP_TOPMOST to 1 = true 
+    cv2.namedWindow("My Dash Player", cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty("My Dash Player", cv2.WND_PROP_TOPMOST, 1)
+
+    print("\nBuffering video... Please wait a few seconds.\n")
+    # Buffering at least 20 frames so the video will run smoothly
+    while frame_buffer.qsize() < 30:
+        time.sleep(0.1)
+    print("Buffering complete! Enjoy the movie.\n")
+    while True:
+        img = frame_buffer.get()
+        if img is None:
+            break
+        cv2.imshow("My Dash Player", img)
+        # Wait for 33 miliseconds between each frame. if q is pressed - stop and go out
+        if cv2.waitKey(33) & 0xFF == ord('q'):
+            break
+    # after the video is over, close the window
+    print("Finished playing video!\n")
+    cv2.destroyAllWindows()
+    
 def main():
     (my_ip,dns_ip) = get_ip()
     
