@@ -1,5 +1,8 @@
 from transport import Transport, TCPTransport, RUDPTransport
+import Reliable_udp 
 import random, socket, struct
+
+
 def choose_connection() -> str:
     return input("Choose Connection type [TCP | UDP]").strip().lower()
 
@@ -192,7 +195,19 @@ def look_for_domain(dns_ip: str, domain: str) -> str:
 
 def connect_to_server(server_ip: str, choice: str) -> Transport:
     # opens socket, handshake, returns TCPTransport or RUDPTransport
-    pass
+    if choice == "TCP":
+        socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_address = (server_ip, 80)
+        socket.connect(server_address)
+        tcp_sock = transport(socket)
+        return tcp_sock
+    else:
+        socket = socket.socke(socket.AF_INET, socket.SOCK_DGRAM)
+        udp_r = ReliableUDP(socket)
+        # conecction is missing
+        udp_sock = transport(udp_r)
+        return udp_sock
+
 def download_frames(conn: Transport, video_name: str, ):
     # runs in a thread, requests frames, pushes to frame_buffer
     pass
@@ -221,7 +236,7 @@ def play_video():
     # after the video is over, close the window
     print("Finished playing video!\n")
     cv2.destroyAllWindows()
-    
+
 def main():
     (my_ip,dns_ip) = get_ip()
     
