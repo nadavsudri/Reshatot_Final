@@ -39,6 +39,10 @@ class RUDPTransport(Transport):
         self.rudp = rudp
 
     def send(self, data: str):
+    
+
+        if isinstance(data, str):
+            data = data.encode()    
         self.rudp.send(data)
 
     def recv(self) -> str:
