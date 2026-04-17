@@ -1,6 +1,14 @@
 from transport import Transport, TCPTransport, RUDPTransport
-import Reliable_udp 
+import queue, threading
+from Reliable_udp import ReliableUDP
 import random, socket, struct
+import cv2
+import numpy as np
+import struct
+import time
+import os
+import base64
+
 
 
 def choose_connection() -> str:
@@ -13,7 +21,7 @@ def get_ip() -> tuple:
         #temp socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock.bind(('0.0.0.0', 68))
+        sock.bind(('0.0.0.0', 6868))
         sock.settimeout(5.0)
 
         # assembling the dhcp message ----> [request]
@@ -195,22 +203,22 @@ def look_for_domain(dns_ip: str, domain: str) -> str:
 
 def connect_to_server(server_ip: str, choice: str) -> Transport:
     # opens socket, handshake, returns TCPTransport or RUDPTransport
-    if choice == "TCP":
-        socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if choice == "tcp":
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_address = (server_ip, 80)
-        socket.connect(server_address)
-        tcp_sock = transport(socket)
+        client_socket.connect(server_address)
+        tcp_sock = TCPTransport(client_socket)
         return tcp_sock
     else:
-        socket = socket.socke(socket.AF_INET, socket.SOCK_DGRAM)
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # RUDP from our library
-        udp_r = ReliableUDP(socket)
+        udp_r = ReliableUDP(client_socket)
         udp_r.connect(server_ip, 8080)
-        udp_sock = transport(udp_r)
+        udp_sock = RUDPTransport(udp_r)
         return udp_sock
     
-def creat_http_req(movie_name: str, quality: str, frame_num: int, server_domain="video.server.local"):
-    req_file = f"{movie_name}.mp4_{qualitiy}_{frame_num}"
+def creat_http_req(movie_name: str, quality: str, frame_num: int, server_domain):
+    req_file = f"{movie_name}.mp4/{quality}/{frame_num}"
     http_request = (
         f"GET /{req_file} HTTP/1.1\r\n"
         f"Host: {server_domain}\r\n"
@@ -224,89 +232,75 @@ def creat_http_req(movie_name: str, quality: str, frame_num: int, server_domain=
 # runs in a thread, requests frames, pushes to frame_buffer
 
 
-def download_frames(conn, video_name: str, frame_buffer):
+def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue, server_ip: str):
     current_quality = "Low"
     frame_num = 0   
 
     while True:
-        # 1. Create the HTTP request (returns bytes)
-        request_bytes = creat_http_req(video_name, current_quality, frame_num, server_domain="video.server.local")
+        request_bytes = creat_http_req(video_name, current_quality, frame_num, server_ip)
+        conn.send(request_bytes.decode('utf-8'))
         
-        # 2. Decode bytes to string because conn.send() expects a string!
-        request_str = request_bytes.decode('utf-8')
-        
-        print(f"Requesting: {video_name}, Quality: {current_quality}, Frame: {frame_num}")
         starting_time = time.time()
+        received_data = b""
         
-        # 3. Send the request using your Transport wrapper
-        conn.send(request_str)
-        print("Waiting for video chunk...")
-        
-        # 4. Receive the assembled chunk using the <END_OF_CHUNK> tag logic
-        # This makes it work perfectly for BOTH your TCP and RUDP transports
-        received_str = ""
+        # 1. Receive loop (Keep it BYTES)
         while True:
             part = conn.recv() 
             if not part:
-                # If recv returns empty, the connection dropped
                 break  
-            received_str += part
-            # Check if we got the "end of chunk" signature
-            if "<END_OF_CHUNK>" in received_str:
-                # Remove the signature so Base64 can decode cleanly
-                received_str = received_str.replace("<END_OF_CHUNK>", "")
+            received_data += part
+            if b"<END_OF_CHUNK>" in received_data:
+                received_data = received_data.replace(b"<END_OF_CHUNK>", b"")
                 break
-        if not received_str:
-            print("[*] Video ended or stream broken. Exiting download loop.")
+        if not received_data:
             break 
 
-        # 5. Decode the Base64 text BACK into raw binary video data
+        # 2. Decode and Convert
         try:
-            full_data = base64.b64decode(received_str)
+            if b"\r\n\r\n" in received_data:
+                received_data = received_data.split(b"\r\n\r\n")[1]
+                
+            # print(f"DEBUG: First 50 chars of payload: {received_data.decode()}",type(received_data))
+            # Decode Base64 string to raw JPEG bytes
+            img_bytes = base64.b64decode(received_data)
+            
+            # Convert bytes to a numpy array (the bridge to OpenCV)
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            
+            # Decode the JPEG into an actual image frame
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+            if frame is not None:
+                frame_buffer.put(frame)
+                print(f"[*] Buffered frame {frame_num}")
+            else:
+                print(f"[-] Frame {frame_num} was corrupted.")
+
         except Exception as e:
-            print(f"[-] Failed to decode video data: {e}")
+            print(f"[-] Processing error: {e}")
             break
 
-        # --- CHUNK ASSEMBLY & DASH DECISION ---
-        ending_time = time.time()
-        chunk_time = ending_time - starting_time
-        # 6. Save the binary data to a UNIQUE temporary video file 
-        temp_filename = f"temp_chunk_{frame_num}.mp4" 
+        # 3. DASH Logic (Based on how fast that one frame arrived)
+        chunk_time = time.time() - starting_time
         
-        with open(temp_filename, "wb") as f:
-            f.write(full_data)
-        # 7. Open the temporary file and extract frames using OpenCV
-        cap = cv2.VideoCapture(temp_filename)
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break 
-            frame_buffer.put(frame)
-        cap.release()
-        # A clean up - deleat the file to save disk space
-        try:
-            os.remove(temp_filename)
-        except OSError as e:
-            print(f"Warning: Could not remove temp file {temp_filename}: {e}")
-
-        # 8. DASH Logic
-        if chunk_time < 0.5:     
+       
+        if chunk_time < 0.05:     
             current_quality = "High"
-        elif chunk_time < 0.9:   
+        elif chunk_time < 0.1:   
             current_quality = "Medium"
         else:                    
             current_quality = "Low"
-            print("Network is slow. Dropping quality to Low for the next chunk.\n")
         
-        # Advance the frame counter by 30
-        frame_num += 30
-    # Send poison pill to the video player thread
-    frame_buffer.put(None)
+        # 4. Advance counter
+        frame_num += 1 
+
+    frame_buffer.put(None) # 
+    print("done")
 
    
 
 # runs on main thread, drains frame_buffer, displays with cv2
-def play_video():
+def play_video(frame_buffer:queue):
     # This tow lines reasure that the video window will show on top of all the other windows.
     # The first line orders to allocate a real memory area to the video window and opens a normal window
     # The second line orders to always show this window no metter what - sets the WND_PROP_TOPMOST to 1 = true 
@@ -329,6 +323,9 @@ def play_video():
     # after the video is over, close the window
     print("Finished playing video!\n")
     cv2.destroyAllWindows()
+    ## unix closeing issue fix
+    for i in range(5):
+        cv2.waitKey(1)
 
 def main():
     (my_ip,dns_ip) = get_ip()
@@ -344,7 +341,23 @@ def main():
     server_ip = look_for_domain(dns_ip,domain)
     print(f"Got: {server_ip} from DNS server")
 
-    # Creating a buffer that is able to hold up to 30 ready frames  
-    frame_buffer = queue.Queue(maxsize=30)
+    conn_type = input("What type of connection? [rudp \ tcp] >>>").lower()
+    transport_t = connect_to_server(server_ip,conn_type)
+    
+    while True:
+         # Creating a buffer that is able to hold up to 30 ready frames  
+        frame_buffer = queue.Queue(maxsize=30)
+        ## insert later the available videos to play
+        video_request = input("Select a video to play>>>")
+        if video_request == 'quit':
+            print("Thank you for choosing nooshi.video, see ya!")
+            break
+        t_download = threading.Thread(target=download_frames,args=(transport_t,video_request,frame_buffer,server_ip))
+        t_download.start()
+        play_video(frame_buffer)
+        
+        
 
+        
+       
 main()

@@ -38,7 +38,7 @@ def run_dhcp_server(server_ip : str):
         server_socket.settimeout(2.0)
         try:
             packet_data, addr = server_socket.recvfrom(1024)
-            msg = packet_data.decode('ascii')
+            msg = packet_data.decode('latin-1')
             if msg.startswith("I_AM_DNS"):
                 dns_ip = msg.split()[1]
                 print(f"[+] Found DNS Server at IP: {dns_ip}\n")

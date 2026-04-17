@@ -24,10 +24,15 @@ class TCPTransport(Transport):
         self.sock = sock
 
     def send(self, data: str):
-        self.sock.sendall(data.encode())
+        if isinstance(data,str):
+            data = data.encode()
+        self.sock.sendall(data)
 
     def recv(self) -> str:
-        return self.sock.recv(65535).decode()
+        data = self.sock.recv(65535)
+        if isinstance(data,str):
+            data = data.decode()
+        return data 
 
     def close(self):
         self.sock.close()

@@ -36,46 +36,46 @@ def register_to_dns(my_ip):
 
 FRAMES_PER_CHUNK = 30
 
-def get_chunk(video_name, quality_level, start_frame):
-    cap = cv2.VideoCapture(video_name)
-    if not cap.isOpened():
-        print(f"[-] Couldn't open video {video_name}")
+import cv2
+import base64
+
+# Keep the VideoCapture object open globally or in a class for speed
+
+
+def get_chunk(video_name, quality, frame_num):
+    video = cv2.VideoCapture(video_name)
+    # 1. Set the frame position
+    video.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+    success, frame = video.read()
+    
+    if not success:
         return None
+
+    # 2. Downscale for "Low" quality to save bandwidth
+    if quality == "low":
+        frame = cv2.resize(frame, (640, 360))
+
+    # 3. Encode to JPEG (in memory, no temp files!)
+    # Higher quality number = better image but more bytes
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+    success, buffer = cv2.imencode('.jpg', frame, encode_param)
     
-    chunk_data = b''
-    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-    
-    for _ in range(FRAMES_PER_CHUNK):
-        success, img = cap.read()
-        if not success:
-            break  # end of video
-        
-        # resize for quality
-        if quality_level == "Medium":
-            img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-        elif quality_level == "Low":
-            img = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
-        
-        # encode frame as JPEG
-        _, encoded = cv2.imencode('.jpg', img)
-        frame_bytes = encoded.tobytes()
-        
-        # prefix each frame with its size so client knows where it ends
-        frame_size = struct.pack('!I', len(frame_bytes))
-        chunk_data += frame_size + frame_bytes
-    
-    cap.release()
-    return chunk_data
+    if not success:
+        return None
+
+    # 4. Convert to Base64 so it can be sent as "text" in your HTTP-like response
+    return base64.b64encode(buffer).decode('utf-8')
 
 def parse_request(request: str) -> tuple:
     # GET /balls.mp4/High/0 HTTP/1.1 -> (balls.mp4, High, 0)
-    first_line = request.split('\r\n')[0]
+    print(request)
+    first_line = request.decode('utf-8').split('\r\n')[0]
     path = first_line.split(' ')[1]        #
     parts = path.strip('/').split('/')     
-    
     video_name  = parts[0]
     quality     = parts[1]
     start_frame = int(parts[2])
+    print(video_name,quality,start_frame)
     
     return video_name, quality, start_frame
 
@@ -97,7 +97,8 @@ def handle_client(conn: Transport):
         response += f"Content-Length: {len(chunk_data)}\r\n"
         response += "\r\n"
         
-        conn.send(response.encode() + chunk_data)
+        full_response = response.encode() + chunk_data.encode() + b"<END_OF_CHUNK>"
+        conn.send(full_response)
     
     conn.close()
 
