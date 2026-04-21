@@ -8,6 +8,10 @@ import struct
 import time
 import os
 import base64
+from datetime import datetime
+
+
+
 
 
 
@@ -234,7 +238,14 @@ def creat_http_req(movie_name: str, quality: str, frame_num: int, server_domain)
 
 def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue, server_ip: str):
     current_quality = "Low"
-    frame_num = 0   
+    frame_num = 0
+    
+     #reset the rudp connection
+    if hasattr(conn, 'reset_for_next_message'):
+        conn.reset_for_next_message()
+    if hasattr(conn, 'rudp'):
+        conn.rudp.sock.settimeout(3.0)
+     
 
     while True:
         request_bytes = creat_http_req(video_name, current_quality, frame_num, server_ip)
@@ -243,14 +254,19 @@ def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue,
         starting_time = time.time()
         received_data = b""
         
-        # 1. Receive loop (Keep it BYTES)
         while True:
             part = conn.recv() 
+            if isinstance(part,str):
+                part = part.encode()
             if not part:
                 break  
             received_data += part
             if b"<END_OF_CHUNK>" in received_data:
                 received_data = received_data.replace(b"<END_OF_CHUNK>", b"")
+                break
+            elif b"<END_OF_STREAM>" in received_data:
+                received_data = received_data.replace(b"<END_OF_STREAM>", b"")
+                end = True
                 break
         if not received_data:
             break 
@@ -259,24 +275,34 @@ def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue,
         try:
             if b"\r\n\r\n" in received_data:
                 received_data = received_data.split(b"\r\n\r\n")[1]
+            # checking that the frame is ok and not empty
+            if not received_data:
+                print(f"[-] Frame {frame_num} data too short or empty: {len(received_data)} bytes")
+                # frame_num += 1
+                break
+            # check if 404 has arrived
+            if b"404" in received_data[:30]:
+                print(f"[*] Frame {frame_num} not found (HTTP 404), video ended")
+                break  # Exit cleanly
                 
             # print(f"DEBUG: First 50 chars of payload: {received_data.decode()}",type(received_data))
             # Decode Base64 string to raw JPEG bytes
+          
             img_bytes = base64.b64decode(received_data)
-            
             # Convert bytes to a numpy array (the bridge to OpenCV)
             nparr = np.frombuffer(img_bytes, np.uint8)
             
             # Decode the JPEG into an actual image frame
             frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
             if frame is not None:
                 frame_buffer.put(frame)
                 print(f"[*] Buffered frame {frame_num}")
             else:
+               
                 print(f"[-] Frame {frame_num} was corrupted.")
 
         except Exception as e:
+            print(received_data)
             print(f"[-] Processing error: {e}")
             break
 
@@ -290,12 +316,19 @@ def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue,
             current_quality = "Medium"
         else:                    
             current_quality = "Low"
-        
         # 4. Advance counter
-        frame_num += 1 
+        frame_num += 1
+        # if end:break
 
-    frame_buffer.put(None) # 
-    print("done")
+    frame_buffer.put(None)
+    # empty the frame buffer and the socket
+    conn.flush()
+    # while not frame_buffer.empty():
+    #         try:
+    #             frame_buffer.get_nowait()
+    #         except:
+    #             break
+
 
    
 
@@ -306,26 +339,30 @@ def play_video(frame_buffer:queue):
     # The second line orders to always show this window no metter what - sets the WND_PROP_TOPMOST to 1 = true 
     cv2.namedWindow("My Dash Player", cv2.WINDOW_NORMAL)
     cv2.setWindowProperty("My Dash Player", cv2.WND_PROP_TOPMOST, 1)
-
+    image_count = 0
     print("\nBuffering video... Please wait a few seconds.\n")
     # Buffering at least 20 frames so the video will run smoothly
     while frame_buffer.qsize() < 30:
         time.sleep(0.1)
     print("Buffering complete! Enjoy the movie.\n")
     while True:
-        img = frame_buffer.get()
-        if img is None:
-            break
-        cv2.imshow("My Dash Player", img)
+        if not frame_buffer.empty():
+            # print(frame_buffer.qsize())
+            img = frame_buffer.get()
+            if img is None:
+                break
+            cv2.imshow("My Dash Player", img)
         # Wait for 33 miliseconds between each frame. if q is pressed - stop and go out
         if cv2.waitKey(33) & 0xFF == ord('q'):
             break
     # after the video is over, close the window
     print("Finished playing video!\n")
+    
     cv2.destroyAllWindows()
     ## unix closeing issue fix
     for i in range(5):
         cv2.waitKey(1)
+    
 
 def main():
     (my_ip,dns_ip) = get_ip()
@@ -335,28 +372,36 @@ def main():
         if domain =="nooshi.video":
             break
         else:
-            print("invalid url")
+            server_ip = look_for_domain(dns_ip,domain)
+            print(f"invalid url, the ip you wanted for {domain} is:{server_ip},\nbut no video is there :( ")
     ##masking the real url
     domain = "video.server.local"
     server_ip = look_for_domain(dns_ip,domain)
     print(f"Got: {server_ip} from DNS server")
+    
 
     conn_type = input("What type of connection? [rudp \ tcp] >>>").lower()
     transport_t = connect_to_server(server_ip,conn_type)
+    t_download = None
     
     while True:
-         # Creating a buffer that is able to hold up to 30 ready frames  
-        frame_buffer = queue.Queue(maxsize=30)
+        frame_buffer = queue.Queue(maxsize=30000)
+        
+        # Creating a buffer that is able to hold up to 30 ready frames  
+        if t_download and t_download.is_alive():
+            t_download.join(timeout=2)
+        while not frame_buffer.empty():
+            try:
+                frame_buffer.get_nowait()
+            except:
+                break
+            
         ## insert later the available videos to play
         video_request = input("Select a video to play>>>")
-        if video_request == 'quit':
-            print("Thank you for choosing nooshi.video, see ya!")
-            break
-        t_download = threading.Thread(target=download_frames,args=(transport_t,video_request,frame_buffer,server_ip))
+        print(frame_buffer.qsize()==0)
+        t_download = threading.Thread(target=download_frames,args=(transport_t,video_request,frame_buffer,server_ip),daemon=True)
         t_download.start()
         play_video(frame_buffer)
-        
-        
 
         
        

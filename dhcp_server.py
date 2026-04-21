@@ -86,7 +86,7 @@ def run_dhcp_server(server_ip : str):
                         continue
 
                     offer_packet = create_offer_packet(xid, offered_ip, mac_padded, server_ip, dns_ip)     #creating the offer packet
-                    server_socket.sendto(offer_packet, client_address)                  #sending the client the offer
+                    server_socket.sendto(offer_packet, ('255.255.255.255', 6868))                  #sending the client the offer
                     print(f"Sent DHCP Offer ({offered_ip}) back to client!\n")
                 elif msg_type == 3:
                     print(f"Received Request! MAC: {client_mac}, XID: {xid}")
@@ -94,10 +94,16 @@ def run_dhcp_server(server_ip : str):
                     if client_mac in leased_ips:
                         final_ip = leased_ips[client_mac]
                         ack_packet = create_ack_packet(xid, final_ip, mac_padded, server_ip, dns_ip)
-                        server_socket.sendto(ack_packet, client_address)
+                        server_socket.sendto(ack_packet, ('255.255.255.255', 6868))
                         print(f"Sent DHCP ACK ({final_ip}) to client.\n")
                     else:
                         print("Received Request from unknown MAC. Ignoring.")
+                elif msg_type == 7:  # RELEASE
+                    print(f"Received Release from MAC {client_mac}, releasing IP {leased_ips.get(client_mac, 'unknown')}")
+                    if client_mac in leased_ips:
+                        ip_to_release = leased_ips.pop(client_mac)
+                        ip_pool.append(ip_to_release)  # Return IP to pool
+                        print(f"IP {ip_to_release} released back to pool")
             except socket.timeout:
                 continue        #if no ctrl+c was pressed keep going, check again next second
     except KeyboardInterrupt:
@@ -196,7 +202,6 @@ def create_ack_packet(xid : int, offered_ip : str, client_mac_bytes : bytes, ser
     final_packet = header + header_part2 + magic_cookie + option_53 + option_1 + option_54 + option_6 + option_end
 
     return final_packet
-
 
 def main():
     print("Starting DHCP server process...")

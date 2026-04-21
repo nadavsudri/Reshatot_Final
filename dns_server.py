@@ -31,53 +31,66 @@ def extract_domain_name(dns_domain, offset)-> str:
     
 
 def run_dns_server(my_ip):
-    
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # inconing dns request socket
-    server_socket.bind(("0.0.0.0",53))
+    try:
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # inconing dns request socket
+        server_socket.bind(("0.0.0.0",53))
 
-    print(f"My IP is: {my_ip}")
-    print("Listening on 53 for DNS requests")
+        print(f"My IP is: {my_ip}")
+        print("Listening on 53 for DNS requests")
 
-    print("[*] Waiting for DHCP to ask for DNS...")
-    while True:
-        try:
-            packet_data, addr = server_socket.recvfrom(1024)
-            msg = packet_data.decode('ascii')
-            if msg.startswith("WHO_IS_DNS"):
-                response = f"I_AM_DNS {my_ip}"
-                server_socket.sendto(response.encode('ascii'), addr)
-                print(f"[*] Told DHCP my IP: {my_ip}")
-                break
-        except:
-            pass
+        print("[*] Waiting for DHCP to ask for DNS...")
+        while True:
+            try:
+                packet_data, addr = server_socket.recvfrom(1024)
+                msg = packet_data.decode('ascii')
+                if msg.startswith("WHO_IS_DNS"):
+                    response = f"I_AM_DNS {my_ip}"
+                    server_socket.sendto(response.encode('ascii'), addr)
+                    print(f"[*] Told DHCP my IP: {my_ip}")
+                    break
+            except KeyboardInterrupt:
+                 # close the socket if ctrl+c has pressed on
+                print("\nServer is shutting down... Closing socket.")
+                server_socket.close()
+            except:
+                pass
 
-    while True:
-        try:
+        while True:
+            try:
 
-            packet_data, client_address = server_socket.recvfrom(1024)
-            
-            # Intercept registration broadcasts from other servers (like the Video Server) to dynamically 
-            # update the DNS records
-            if packet_data.startswith(b"REGISTER"):
-                msg_parts = packet_data.decode('ascii').split()
-                # The least length should be at least 3, if not - it could be coruppted or missing
-                if len(msg_parts) >= 3:
-                    domain_to_register = msg_parts[1]
-                    ip_to_register = msg_parts[2]
-                    # Inserting the server name & IP to DNS dict
-                    dns_data[domain_to_register] = ip_to_register
-                    print(f"[+] Server Registered: {domain_to_register} is now mapped to {ip_to_register}")
-                continue
+                packet_data, client_address = server_socket.recvfrom(1024)
+                # Intercept registration broadcasts from other servers (like the Video Server) to dynamically 
+                # update the DNS records
+                if packet_data.startswith(b"REGISTER"):
+                    msg_parts = packet_data.decode('ascii').split()
+                    # The least length should be at least 3, if not - it could be coruppted or missing
+                    if len(msg_parts) >= 3:
+                        domain_to_register = msg_parts[1]
+                        ip_to_register = msg_parts[2]
+                        # Inserting the server name & IP to DNS dict
+                        dns_data[domain_to_register] = ip_to_register
+                        print(f"[+] Server Registered: {domain_to_register} is now mapped to {ip_to_register}")
+                    continue
 
-            res = parse_dns_request(packet_data)
-            res_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-            res_sock.sendto(res,client_address)
-            res_sock.close()
-        except:
-            pass
+                res = parse_dns_request(packet_data)
+                res_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+                res_sock.sendto(res,client_address)
+                res_sock.close()
+            except KeyboardInterrupt:
+    # close the socket if ctrl+c has pressed on
+                print("\nServer is shutting down... Closing socket.")
+                server_socket.close()
+           
+            except:
+                pass
+
+    except KeyboardInterrupt:
+    # close the socket if ctrl+c has pressed on
+        print("\nServer is shutting down... Closing socket.")
+        server_socket.close()
     
 def parse_dns_request(data):
-    print("request")
+    
     dns_header_format = "!HHHHHH"
     transaction_id, flags, qdcount, ancount, nscount, arcount = struct.unpack(dns_header_format,data[:12]) #unpacking
     domain,_ = extract_domain_name(data,12)
