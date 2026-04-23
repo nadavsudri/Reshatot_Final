@@ -1,6 +1,6 @@
 import socket
 import struct
-
+from scapy.all import IP, ICMP, sr1
 # Finding the local IP in the net by sending something to google 
 def get_local_ip():
     try:
@@ -11,6 +11,25 @@ def get_local_ip():
         return local_ip
     except Exception:
         return "127.0.0.1"
+    
+#cheking using scapy's icmp echo (ping) to the target to see if its free
+def is_ip_available(target_ip):
+    # Construct the ICMP Echo Request (Ping)
+    packet = IP(dst=target_ip) / ICMP()
+
+    # sr1 sends the packet and waits for a response
+    # timeout=0.5: wait half a second
+    # verbose=0: don't print Scapy's internal logs
+    reply = sr1(packet, timeout=0.5, verbose=0)
+    
+    # If reply is None, no one responded (IP is likely free)
+    if reply is None:
+        return True
+    # If we got a reply, the IP is in use
+    return False
+def get_network_prefix(ip: str) -> str:
+    # "192.168.1.50" -> ("192.168.1", ".", "50") -> returns index [0]
+    return ip.rpartition('.')[0]
 
 # Offer - part 2
 def run_dhcp_server(server_ip : str): 
@@ -47,8 +66,8 @@ def run_dhcp_server(server_ip : str):
             print("[*] No DNS response, retrying...")
             continue
     server_socket.settimeout(1.0)
-    # Creating IP addresses in the range 192.168.1.100 - 192.168.1.200
-    ip_pool = [f"192.168.1.{i}" for i in range(100, 201)]
+    # Creating IP addresses in the range 200 of current subnet.
+    ip_pool = [f"{get_network_prefix(server_ip)}.{i}" for i in range(21, 200)]
     leased_ips = {}                 #holds the used IP's
     server_socket.settimeout(1.0)   #so the power machine will sense the ctrl+c if pressed
     try:
@@ -73,28 +92,35 @@ def run_dhcp_server(server_ip : str):
                 except struct.error:
                     print(f"Error: Corrupted packet structure from {client_address}. Ignoring.")
                     continue
+
                 if msg_type == 1:
                     print(f"Received Discover! MAC: {client_mac}, XID: {xid}")
                     if client_mac in leased_ips:
                         offered_ip = leased_ips[client_mac]
-                    elif len(ip_pool) > 0:
-                        offered_ip = ip_pool.pop(0)               #pop also eareses the ip from the pool
-                        leased_ips[client_mac] = offered_ip       #add client & ip to the list
-                        print(f"New client MAC {client_mac}! Assigned IP: {offered_ip}")
+                    while len(ip_pool) > 0:
+                        offered_ip = ip_pool.pop(0) 
+                        if offered_ip==server_ip:continue
+                        if  is_ip_available(offered_ip):  
+                                      #pop also eareses the ip from the pool
+                            leased_ips[client_mac] = offered_ip       #add client & ip to the list
+                            print(f"New client MAC {client_mac}! Assigned IP: {offered_ip}")
+                            break
                     else:
                         print(f"Sorry MAC {client_mac}, no more IPs available!")
                         continue
 
                     offer_packet = create_offer_packet(xid, offered_ip, mac_padded, server_ip, dns_ip)     #creating the offer packet
-                    server_socket.sendto(offer_packet, ('255.255.255.255', 6868))                  #sending the client the offer
+                    server_socket.sendto(offer_packet, ('255.255.255.255', 68))                  #sending the client the offer
                     print(f"Sent DHCP Offer ({offered_ip}) back to client!\n")
+
+
                 elif msg_type == 3:
                     print(f"Received Request! MAC: {client_mac}, XID: {xid}")
                     # Checking if the client is really in the list
                     if client_mac in leased_ips:
                         final_ip = leased_ips[client_mac]
                         ack_packet = create_ack_packet(xid, final_ip, mac_padded, server_ip, dns_ip)
-                        server_socket.sendto(ack_packet, ('255.255.255.255', 6868))
+                        server_socket.sendto(ack_packet, ('255.255.255.255', 68))
                         print(f"Sent DHCP ACK ({final_ip}) to client.\n")
                     else:
                         print("Received Request from unknown MAC. Ignoring.")
