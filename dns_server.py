@@ -2,7 +2,6 @@ import socket , struct
 
 ## global var
 
-self_ip = socket.inet_aton("192.168.1.10")
 dns_data = {}
 
 # Finding the local IP in the net by sending something to google 
@@ -57,7 +56,6 @@ def run_dns_server(my_ip):
 
         while True:
             try:
-
                 packet_data, client_address = server_socket.recvfrom(1024)
                 # Intercept registration broadcasts from other servers (like the Video Server) to dynamically 
                 # update the DNS records
@@ -92,7 +90,8 @@ def run_dns_server(my_ip):
 def parse_dns_request(data):
     
     dns_header_format = "!HHHHHH"
-    transaction_id, flags, qdcount, ancount, nscount, arcount = struct.unpack(dns_header_format,data[:12]) #unpacking
+    transaction_id, flags, qdcount, ancount, nscount, arcount = struct.unpack(
+        dns_header_format,data[:12]) #unpacking
     domain,_ = extract_domain_name(data,12)
     if domain in dns_data:
         res = build_dns_response(transaction_id,domain,dns_data[domain])
@@ -129,8 +128,6 @@ def extract_ip_from_response(data):
     ip_offset = offset + 12
     ip_raw = data[ip_offset : ip_offset + 4]
     return socket.inet_ntoa(ip_raw)
-
-
 
 def main():
     print("Starting DNS server process...")
