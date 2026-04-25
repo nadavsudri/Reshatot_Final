@@ -10,13 +10,21 @@ import os
 import base64
 from datetime import datetime
 
-
+slowtheweb = False
 
 #Global variabels
 
+def simulate_throttle(data_size_bytes, target_speed_kbps):
+    target_bps = target_speed_kbps * 1000
+    # Calculate how long this data SHOULD have taken to arrive
+    expected_time = (data_size_bytes * 8) / target_bps
+    if slowtheweb:
+        time.sleep(expected_time)
+
 
 def disconnect(sock:Transport,dhcp,my_ip,mac):
-    print("[*] Disconecting from server...")
+    print("\n[*] Disconecting from server...")
+    sock.send(b"<DISCONNECT>")
     time.sleep(0.5)
     print(["Closing socket"])
     sock.close()
@@ -299,11 +307,11 @@ def creat_http_req(movie_name: str, quality: str, frame_num: int, server_domain)
     # Incode to binary format so the socket sent it in bytes
     return http_request.encode('utf-8')
 
+
+
 # runs in a thread, requests frames, pushes to frame_buffer
-
-
 def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue, server_ip: str):
-    current_quality = "Low"
+    current_quality = "high"
     frame_num = 0
 
      #reset the rudp connection
@@ -340,7 +348,10 @@ def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue,
         # 2. Decode and Convert
         try:
             if b"\r\n\r\n" in received_data:
+                data_size = int(received_data.split(b"\r\n")[1].split(b":")[1].strip().decode("utf-8"))
+              
                 received_data = received_data.split(b"\r\n\r\n")[1]
+                
             # checking that the frame is ok and not empty
             if not received_data:
                 print(f"[-] Frame {frame_num} data too short or empty: {len(received_data)} bytes")
@@ -371,17 +382,22 @@ def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue,
             print(received_data)
             print(f"[-] Processing error: {e}")
             break
+        simulate_throttle(data_size, 2000) # Force a 2 Mbps connection
 
         # 3. DASH Logic (Based on how fast that one frame arrived)
         chunk_time = time.time() - starting_time
+        if chunk_time > 0:
+            band_width = (data_size * 8) / (chunk_time * 1000)
+        print(f"{band_width} kbp/s")
         
        
-        if chunk_time < 0.05:     
+        if band_width >5000:     
             current_quality = "High"
-        elif chunk_time < 0.1:   
+        elif band_width > 2000:   
             current_quality = "Medium"
         else:                    
             current_quality = "Low"
+        
         # 4. Advance counter
         frame_num += 1
         # if end:break
@@ -394,9 +410,6 @@ def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue,
     #             frame_buffer.get_nowait()
     #         except:
     #             break
-
-
-   
 
 # runs on main thread, drains frame_buffer, displays with cv2
 def play_video(frame_buffer:queue):
@@ -417,7 +430,8 @@ def play_video(frame_buffer:queue):
             img = frame_buffer.get()
             if img is None:
                 break
-            cv2.imshow("My Dash Player", img)
+            img_resized = cv2.resize(img, (1280, 720), interpolation=cv2.INTER_LINEAR)
+            cv2.imshow("My Dash Player", img_resized)
         # Wait for 33 miliseconds between each frame. if q is pressed - stop and go out
         if cv2.waitKey(33) & 0xFF == ord('q'):
             break

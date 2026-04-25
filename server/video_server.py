@@ -1,4 +1,3 @@
-
 import socket, threading
 from transport import Transport, TCPTransport, RUDPTransport
 from datetime import datetime
@@ -10,6 +9,7 @@ import time
 import base64
 
 debug = False
+showoff = False
 
 ##debugging section##
 def timestamp():
@@ -17,7 +17,7 @@ def timestamp():
 def debug_out(data:str,e = None):
     exep = "With Exeption "+e if e else ""
     if debug:
-        print(f"{timestamp} : {data} {exep}")
+        print(f"{timestamp()} : {data} {exep}")
 
 #ping 8.8.8.8
 def get_local_ip():
@@ -49,28 +49,31 @@ def register_to_dns(my_ip):
 
 
 # Keep the VideoCapture object open globally or in a class for speed
-
 video_cache = {}
-def get_chunk(video_name, quality, frame_num):
+def get_chunk(video_name, quality:str, frame_num):
 
     if video_name not in video_cache:
         video_path = f"library/{video_name}"
         video = cv2.VideoCapture(video_path)
         video_cache[video_name] = video
-        print("Cashing video")
+        debug_out("Cashing video")
     else:
         video = video_cache[video_name]
     # 1. Set the frame position
     video.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
     success, frame = video.read()
-    
     if not success:
         return None,0
-
     # 2. Downscale for "Low" quality to save bandwidth
-    if quality == "low":
-        frame = cv2.resize(frame, (160, 120))
-
+    if quality.lower() == "high":
+        frame = cv2.resize(frame, (1920, 1080))
+    elif quality.lower() == "medium":
+        frame = cv2.resize(frame, (640, 480))
+    elif quality.lower()== "low":
+        frame = cv2.resize(frame, (256, 144))
+    
+        
+    debug_out(f"Frame is {len(frame)} bytes [{quality}]")
     # 3. Encode to JPEG (in memory, no temp files!)
     # Higher quality number = better image but more bytes
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
@@ -80,13 +83,12 @@ def get_chunk(video_name, quality, frame_num):
     
     if not success:
         return None,0
-
     # 4. Convert to Base64 so it can be sent as "text" in your HTTP-like response
     return base64.b64encode(buffer).decode('utf-8'),total_frames
 
 def parse_request(request: bytes) -> tuple:
     # GET /balls.mp4/High/0 HTTP/1.1 -> (balls.mp4, High, 0)
-    print(request)
+    debug_out(request)
     first_line = request if isinstance(request,str) else request.decode('utf-8').split('\r\n')[0]
     path = first_line.split(' ')[1]        #
     parts = path.strip('/').split('/')     
@@ -100,23 +102,30 @@ def parse_request(request: bytes) -> tuple:
 # handling client requests 
 def handle_client(conn: Transport):
     frame_count = 0
+    print("[*] Client connected")
+    #receving data from socket, encodes it [if no data arrive - continue]
     while True:
         request = conn.recv()
         if isinstance(request,str):
             request = request.encode()
         if not request:
             continue
-        
+        if b"<DISCONNECT>" in request:
+            conn.close()
+            print("[X] Client disconnected")
+            return
+        #getting and unpacking request, and getting the chunk
         video_name, quality, start_frame = parse_request(request)
         chunk_data,frame= get_chunk(video_name, quality, start_frame)
+        #if no data was found - return 404
         if chunk_data is None:
             conn.send("HTTP/1.1 404 Not Found\r\n\r\n"+"<END_OF_CHUNK>")
             continue
-        
+        #built return packet - header + content length + data
         response  = "HTTP/1.1 200 OK\r\n"
         response += f"Content-Length: {len(chunk_data)}\r\n"
         response += "\r\n"
-
+        #marking end of chunk / streamq
         frame_count+=1
         if frame_count == frame:
             full_response = response.encode() + chunk_data.encode() + b"<END_OF_STREAM>"
@@ -124,7 +133,7 @@ def handle_client(conn: Transport):
             full_response = response.encode() + chunk_data.encode() + b"<END_OF_CHUNK>"
         
         conn.send(full_response)
-        # time.sleep(0.2)
+        # time.sleep(0.5)
         
 
 def run_rudp_server(sock):
