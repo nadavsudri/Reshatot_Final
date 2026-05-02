@@ -30,7 +30,7 @@ class TCPTransport(Transport):
         if isinstance(data,str):
             data = data.encode()
         self.sock.sendall(data)
-
+        
     def recv(self) -> bytes:
       # Return buffered leftover data first
       if self._recv_buffer:
@@ -41,15 +41,8 @@ class TCPTransport(Transport):
       if isinstance(data,str):
           data = data.decode()
       return data
-
-
     def close(self):
         self.sock.close()
-
-    def buffer_leftover(self, data: bytes):
-        """Store leftover data for next recv() call"""
-        self._recv_buffer = data + self._recv_buffer
-
     #empty the socket
     def flush(self):
         self._recv_buffer=b""
@@ -67,6 +60,10 @@ class TCPTransport(Transport):
         finally:
             self.sock.setblocking(True)
             self.sock.settimeout(original_timeout)
+    
+    def buffer_leftover(self, data: bytes):
+        """Store leftover data for next recv() call"""
+        self._recv_buffer = data + self._recv_buffer
 
 
 class RUDPTransport(Transport):

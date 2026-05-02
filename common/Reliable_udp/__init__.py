@@ -21,24 +21,23 @@ class ReliableUDP:
         }
         self.timeout = timeout
         self._recv_buffer = b""
-        self._time_since_change = 0
+        self._time_SYNce_change = 0
 
     ## start of connection (3way handshake) - initiator side
     def connect(self, ip, port):
-    
         self.peer_addr = (ip, port)
-        
+
         ## send SYN message
-        self.sock.sendto("SIN".encode(), self.peer_addr)
+        self.sock.sendto("SYN".encode(), self.peer_addr)
         print("client sent syn")
         
         ## receive SYN/ACK
         self.sock.settimeout(self.timeout)
         try:
             data, addr = self.sock.recvfrom(1024)
-            if data.decode() == "SIN/ACK":
+            if data.decode() == "SYN/ACK":
                 self.sock.sendto("ACK".encode(), addr)
-                print("acked to the sinack")
+                print("acked to the SYNack")
         except socket.timeout:
             raise ConnectionRefusedError("No SYN/ACK received from server")
         
@@ -48,13 +47,12 @@ class ReliableUDP:
 
     ## start of connection (3way handshake) - listener side
     def accept(self):
-        print("accept has been called")
         ## get first datagram to know who is connecting
         data, addr = self.sock.recvfrom(1024)
         self.peer_addr = addr 
         
-        if data.decode() == "SIN":
-            self.sock.sendto("SIN/ACK".encode(), addr)
+        if data.decode() == "SYN":
+            self.sock.sendto("SYN/ACK".encode(), addr)
             print("server acked to syn")
             # Receive ACK
             self.sock.settimeout(self.timeout)
@@ -65,7 +63,6 @@ class ReliableUDP:
             except socket.timeout:
                 return
             self.sock.settimeout(None)
-        
         ## receive config from the connecting side
         self.sock.settimeout(self.timeout)
         try:
@@ -107,7 +104,6 @@ class ReliableUDP:
         #don't do anything if no data was sent
         if not source:
             return
-
         ## extracting config data from the config dictionary
         max_len = self.config["maximum_msg_size"]
         window_size = self.config["window_size"]
@@ -151,7 +147,6 @@ class ReliableUDP:
                     to_send =  self._add_headers(chunk, last_sent, True)
                 else:
                     to_send = self._add_headers(chunk, last_sent, False)
-
                 ## appending the sent message to a window
                 window.append(to_send)
                 ## sending the message via the socket - FIX: Use sendto for UDP
@@ -162,7 +157,7 @@ class ReliableUDP:
                 bytes_sent += len(chunk)
                 last_sent += 1
 
-            # FIX: Keep trying to receive ACKs until we get them all OR timeout
+            # Keep trying to receive ACKs until we get them all OR timeout
             while last_ack < last_sent:
                 #get the responses
                 res = self._recv_json()
@@ -219,7 +214,6 @@ class ReliableUDP:
     def recv(self) -> str:
         ##for testing
         lose_packet = False
-
         ##init buffers and variabels
         buffer = b""
         message = ""
@@ -229,7 +223,6 @@ class ReliableUDP:
         ##loose packet number:
         lost_packet = random.randint(0,12)
         lost = False
-
         while True:
             ##buffering the response
             try:
@@ -284,7 +277,7 @@ class ReliableUDP:
     def reset_sequence(self):
         """Reset sequence counters for next message (for persistent connections)"""
         self._recv_buffer = b""
-        self._time_since_change = 0
+        self._time_SYNce_change = 0
         print("[*] RUDP sequence reset for next message")
 
     ##add the headers attached in "m"
@@ -309,8 +302,8 @@ class ReliableUDP:
         self.sock.sendto(ack_msg.encode()+b"\n", self.peer_addr)
         
 
-    ### this method recives the socket and recives using recv a JSON object
-    ### collected using chunking
+    ### this method recives the socket and recives uSYNg recv a JSON object
+    ### collected uSYNg chunking
     def _recv_json(self):
         try:
             while b"\n" not in self._recv_buffer:
@@ -330,10 +323,10 @@ class ReliableUDP:
     ## mimics the decision whether to increase or decrease msg size based on the conjection
     def _do_i_need_to_change_size(self, windowsize:int)-> bool:
         change_rate = 3*windowsize
-        if self._time_since_change>=change_rate:
-            self._time_since_change = 0
+        if self._time_SYNce_change>=change_rate:
+            self._time_SYNce_change = 0
             return True
         else:
-            print("time to change size", self._time_since_change)
-            self._time_since_change += 1
+            print("time to change size", self._time_SYNce_change)
+            self._time_SYNce_change += 1
             return False

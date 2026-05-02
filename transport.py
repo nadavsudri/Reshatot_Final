@@ -42,7 +42,6 @@ class TCPTransport(Transport):
           data = data.decode()
       return data
 
-
     def close(self):
         self.sock.close()
 

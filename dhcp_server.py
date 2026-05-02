@@ -16,12 +16,10 @@ def get_local_ip():
 def is_ip_available(target_ip):
     # Construct the ICMP Echo Request (Ping)
     packet = IP(dst=target_ip) / ICMP()
-
     # sr1 sends the packet and waits for a response
     # timeout=0.5: wait half a second
     # verbose=0: don't print Scapy's internal logs
     reply = sr1(packet, timeout=0.5, verbose=0)
-    
     # If reply is None, no one responded (IP is likely free)
     if reply is None:
         return True
@@ -41,7 +39,7 @@ def run_dhcp_server(server_ip : str):
         return
     #'0.0.0.0' means - listen to all broadcast requests in the network
     try:
-        server_socket.bind(('0.0.0.0', 67))
+        server_socket.bind(("0.0.0.0", 67))
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         print("DHCP Server is up and listening on port 67...")
     except OSError:
@@ -110,7 +108,7 @@ def run_dhcp_server(server_ip : str):
                         continue
 
                     offer_packet = create_offer_packet(xid, offered_ip, mac_padded, server_ip, dns_ip)     #creating the offer packet
-                    server_socket.sendto(offer_packet, ('255.255.255.255', 68))                  #sending the client the offer
+                    server_socket.sendto(offer_packet, ('255.255.255.255', 6868))                  #sending the client the offer
                     print(f"Sent DHCP Offer ({offered_ip}) back to client!\n")
 
 
@@ -120,7 +118,7 @@ def run_dhcp_server(server_ip : str):
                     if client_mac in leased_ips:
                         final_ip = leased_ips[client_mac]
                         ack_packet = create_ack_packet(xid, final_ip, mac_padded, server_ip, dns_ip)
-                        server_socket.sendto(ack_packet, ('255.255.255.255', 68))
+                        server_socket.sendto(ack_packet, ('255.255.255.255', 6868))
                         print(f"Sent DHCP ACK ({final_ip}) to client.\n")
                     else:
                         print("Received Request from unknown MAC. Ignoring.")
@@ -142,8 +140,8 @@ def create_offer_packet(xid : int, offered_ip : str, client_mac_bytes : bytes, s
     #header
     #basic data:
     OP = 2    # Respons = 2
-    HTYPE = 1 # Hardware Typ - ethernet
-    HLEN = 6  # Hardware Address Length (MAC) 
+    HTYPE = 1 # hardware type - set to ethernet
+    HLEN = 6  # Mac adress length
     HOPS = 0  
     XID = xid
     SECS = 0  # Seconds
@@ -155,14 +153,13 @@ def create_offer_packet(xid : int, offered_ip : str, client_mac_bytes : bytes, s
     CIADDR = socket.inet_aton("0.0.0.0")    # Client IP
     YIADDR = socket.inet_aton(offered_ip)   # Offered ip
     SIADDR = socket.inet_aton(server_ip)    # Server IP
-    GIADDR = socket.inet_aton("0.0.0.0")    # Gateway IP
-
+    GIADDR = socket.inet_aton("0.0.0.0")    # Gateway IP - relay agent [relevant for different subnet client - server relation]
     CHADDR = client_mac_bytes
-    SNAME = b'\x00' * 64   # 64 bytes of 0
-    FILE = b'\x00' * 128   # 128 bytes of 0
+    
+    SNAME = b'\x00' * 64   #server domain name. id dosent have a dimain name so 64 bytes of 0
+    FILE = b'\x00' * 128   #path to a file that can be received from the dhcp server [for boots and such] not needed, so 128 bytes of 0
     # Packing IP addresses, MAC, and padding (Part 2)
     header_part2 = struct.pack('!4s 4s 4s 4s 16s 64s 128s', CIADDR, YIADDR, SIADDR, GIADDR, CHADDR, SNAME, FILE)
-    
     #padding
     magic_cookie = b'\x63\x82\x53\x63'            # DHCP Magic Cookie (Identifies DHCP packet)       
     # !B B B = Type, Length, Value
@@ -180,7 +177,6 @@ def create_offer_packet(xid : int, offered_ip : str, client_mac_bytes : bytes, s
     option_54 = struct.pack('!B B 4s', 54, 4, server_id)     
     #final packet assembly
     final_packet = header + header_part2 + magic_cookie + option_53 + option_1 + option_54 + option_6 + option_end
-
     return final_packet
 
 
@@ -221,11 +217,13 @@ def create_ack_packet(xid : int, offered_ip : str, client_mac_bytes : bytes, ser
     # We'll add subnet musk to the ack packet
     subnet_mask = socket.inet_aton("255.255.255.0")
     option_1 = struct.pack('!B B 4s', 1, 4, subnet_mask) 
+    
     # #return the server identifier
     server_id = socket.inet_aton(server_ip)
-    option_54 = struct.pack('!B B 4s', 54, 4, server_id)     
+    option_54 = struct.pack('!B B 4s', 54, 4, server_id) 
+    option_3  = struct.pack('!B B 4s', 3, 4, server_id)     
     #final packet assembly
-    final_packet = header + header_part2 + magic_cookie + option_53 + option_1 + option_54 + option_6 + option_end
+    final_packet = header + header_part2 + magic_cookie + option_53 + option_1 + option_54 + option_6 +option_3+ option_end
 
     return final_packet
 

@@ -11,7 +11,7 @@ import base64
 from datetime import datetime
 
 slowtheweb = False
-
+    
 #Global variabels
 
 def simulate_throttle(data_size_bytes, target_speed_kbps):
@@ -37,7 +37,6 @@ def choose_connection() -> str:
 
 
 def release_ip(my_ip: str, server_ip: str, mac_bytes: bytes):
-    """Release the DHCP-assigned IP address back to the server"""
     try:
         XID = random.randint(0, 0xFFFFFFFF)
         
@@ -99,23 +98,23 @@ def get_ip() -> tuple:
         #temp socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock.bind(('0.0.0.0', 68))
+        sock.bind(('0.0.0.0', 6868))
         sock.settimeout(5.0)
 
         # assembling the dhcp message ----> [request]
-        OP    = 1
-        HTYPE = 1
-        HLEN  = 6
-        HOPS  = 0
-        SECS  = 0
+        OP    = 1 # for message
+        HTYPE = 1 # resembling ethernet conection
+        HLEN  = 6 #mac length
+        HOPS  = 0 #
+        SECS  = 0 # timer for this client [ordering request]
         FLAGS = 0
         # part 1 - header
         header = struct.pack('!B B B B I H H', OP, HTYPE, HLEN, HOPS, XID, SECS, FLAGS)
         # ip addresses (all zeros, we don't have one yet)
-        CIADDR = socket.inet_aton("0.0.0.0")
-        YIADDR = socket.inet_aton("0.0.0.0")
-        SIADDR = socket.inet_aton("0.0.0.0")
-        GIADDR = socket.inet_aton("0.0.0.0")
+        CIADDR = socket.inet_aton("0.0.0.0") #client ip
+        YIADDR = socket.inet_aton("0.0.0.0") # the ip seggested wil appear here
+        SIADDR = socket.inet_aton("0.0.0.0") 
+        GIADDR = socket.inet_aton("0.0.0.0") #gateway relay agent
         CHADDR = mac_bytes + (b'\x00' * 10)
         SNAME  = b'\x00' * 64
         FILE   = b'\x00' * 128
@@ -153,7 +152,6 @@ def get_ip() -> tuple:
             if opt == 6:            # DNS server option
                 dns_ip = socket.inet_ntoa(offer_data[i + 2 : i + 6])
             i += 2 + length
-
         # verify it's our reply
         if received_xid != XID:
             print("XID mismatch, ignoring")
@@ -191,14 +189,12 @@ def get_ip() -> tuple:
 
         # final assembly
         request_packet = header + header_part2 + magic_cookie + option_53 + option_50 + option_54 + option_end
-
         # send it
         sock.sendto(request_packet, ('<broadcast>', 67))
 
         ack_data, _ = sock.recvfrom(1024)
         # extract XID - bytes 4-8
         ack_xid = struct.unpack('!I', ack_data[4:8])[0]
-
         # extract my IP - bytes 16-20
         my_ip = socket.inet_ntoa(ack_data[16:20])
 
@@ -226,7 +222,9 @@ def encode_domain_name(domain):
     return encoded + b'\x00'
 
 
-def extract_domain_name(dns_domain, offset)-> str:
+#iterating through responses, 
+#takes b'\x06google\x03com\x00' -> google.com
+def extract_domain_name(dns_domain, offset)-> tuple:
     labels = []
     while True:
         length = dns_domain[offset]
@@ -238,6 +236,7 @@ def extract_domain_name(dns_domain, offset)-> str:
         offset+=length
     return ".".join(labels),offset
 
+#extracts the answer form the dns response, needed only for the offset
 def extract_ip_from_response(data):
     _, offset = extract_domain_name(data, 12)
     offset += 4
@@ -254,7 +253,9 @@ def look_for_domain(dns_ip: str, domain: str) -> str:
     # sends DNS query, returns video server ip
     # header
     transaction_id = random.randint(0, 0xFFFF)
-    flags          = 0x0100   # standard query
+     # standard query flags, first bit is 0 foe quarey and RD bit os on (if recurtion is needed)
+     #questions flag is 1 (i domain needs resolve)
+    flags          = 0x0100   
     questions      = 1
     answer_rrs     = 0
     authority_rrs  = 0
@@ -270,13 +271,9 @@ def look_for_domain(dns_ip: str, domain: str) -> str:
     dns_query = header + question
 
     sock.sendto(dns_query,(dns_ip,53))
-
     response, _ = sock.recvfrom(1024)
-
     ip = extract_ip_from_response(response)
-
     sock.close()
-
     return ip
 
 def connect_to_server(server_ip: str, choice: str) -> Transport:
@@ -313,18 +310,14 @@ def creat_http_req(movie_name: str, quality: str, frame_num: int, server_domain)
 def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue, server_ip: str):
     current_quality = "high"
     frame_num = 0
-
      #reset the rudp connection
     if hasattr(conn, 'reset_for_next_message'):
         conn.reset_for_next_message()
     if hasattr(conn, 'rudp'):
         conn.rudp.sock.settimeout(3.0)
-     
-
     while True:
         request_bytes = creat_http_req(video_name, current_quality, frame_num, server_ip)
         conn.send(request_bytes.decode('utf-8'))
-        
         starting_time = time.time()
         received_data = b""
         
@@ -413,7 +406,7 @@ def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue,
 
 # runs on main thread, drains frame_buffer, displays with cv2
 def play_video(frame_buffer:queue):
-    # This tow lines reasure that the video window will show on top of all the other windows.
+    # This two lines reasure that the video window will show on top of all the other windows.
     # The first line orders to allocate a real memory area to the video window and opens a normal window
     # The second line orders to always show this window no metter what - sets the WND_PROP_TOPMOST to 1 = true 
     cv2.namedWindow("My Dash Player", cv2.WINDOW_NORMAL)
