@@ -125,7 +125,7 @@ def handle_client(conn: Transport):
         response  = "HTTP/1.1 200 OK\r\n"
         response += f"Content-Length: {len(chunk_data)}\r\n"
         response += "\r\n"
-        #marking end of chunk / streamq
+        #marking end of chunk / stream
         frame_count+=1
         if frame_count == frame:
             full_response = response.encode() + chunk_data.encode() + b"<END_OF_STREAM>"
@@ -143,6 +143,8 @@ def run_rudp_server(sock):
         conn = RUDPTransport(rudp)
         t = threading.Thread(target=handle_client, args=(conn,))
         t.start()
+        t.join()
+        conn.h_close()
  
 def run_tcp_server(sock):
     while True:
@@ -150,6 +152,8 @@ def run_tcp_server(sock):
         conn = TCPTransport(client_sock)
         t = threading.Thread(target=handle_client, args=(conn,))
         t.start()
+        t.join()
+        conn.close()
 
 def main():
     my_ip = get_local_ip()

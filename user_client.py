@@ -9,6 +9,8 @@ import time
 import os
 import base64
 from datetime import datetime
+import traceback
+
 
 slowtheweb = False
     
@@ -26,7 +28,7 @@ def disconnect(sock:Transport,dhcp,my_ip,mac):
     print("\n[*] Disconecting from server...")
     sock.send(b"<DISCONNECT>")
     time.sleep(0.5)
-    print(["Closing socket"])
+    print("Closing socket...")
     sock.close()
     time.sleep(0.5)
     print(f"Releaseing IP: {my_ip} From MAC {mac}")
@@ -105,7 +107,7 @@ def get_ip() -> tuple:
         OP    = 1 # for message
         HTYPE = 1 # resembling ethernet conection
         HLEN  = 6 #mac length
-        HOPS  = 0 #
+        HOPS  = 0 # the relay agent hops represent the number of gate hops [to maje sure request doesnt bounce on and on]
         SECS  = 0 # timer for this client [ordering request]
         FLAGS = 0
         # part 1 - header
@@ -340,21 +342,19 @@ def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue,
 
         # 2. Decode and Convert
         try:
+            if b"404" in received_data[:15]:
+                return   # Exit cleanly
+            
             if b"\r\n\r\n" in received_data:
                 data_size = int(received_data.split(b"\r\n")[1].split(b":")[1].strip().decode("utf-8"))
-              
                 received_data = received_data.split(b"\r\n\r\n")[1]
-                
             # checking that the frame is ok and not empty
             if not received_data:
                 print(f"[-] Frame {frame_num} data too short or empty: {len(received_data)} bytes")
                 # frame_num += 1
                 break
             # check if 404 has arrived
-            if b"404" in received_data[:30]:
-                print(f"[*] Frame {frame_num} not found (HTTP 404), video ended")
-                break  # Exit cleanly
-                
+            
             # print(f"DEBUG: First 50 chars of payload: {received_data.decode()}",type(received_data))
             # Decode Base64 string to raw JPEG bytes
           
@@ -373,6 +373,7 @@ def download_frames(conn: Transport, video_name: str, frame_buffer: queue.Queue,
 
         except Exception as e:
             print(received_data)
+            print(traceback.print_exc())
             print(f"[-] Processing error: {e}")
             break
         simulate_throttle(data_size, 2000) # Force a 2 Mbps connection
@@ -461,7 +462,7 @@ def main():
         try:
             frame_buffer = queue.Queue(maxsize=30000)
             
-            # Creating a buffer that is able to hold up to 30 ready frames  
+            # Creating a buffer that is able to hold up to 30K ready frames  
             if t_download and t_download.is_alive():
                 t_download.join(timeout=2)
             while not frame_buffer.empty():
@@ -472,10 +473,17 @@ def main():
                 
             ## insert later the available videos to play
             video_request = input("Select a video to play>>>")
-            print(frame_buffer.qsize()==0)
             t_download = threading.Thread(target=download_frames,args=(transport_t,video_request,frame_buffer,server_ip),daemon=True)
             t_download.start()
-            play_video(frame_buffer)
+            try:
+    # Wait up to 5 seconds for first frame
+                frame_buffer.get(timeout=1)
+                # Put it back and start playing
+                frame_buffer.put(frame_buffer.get())
+                play_video(frame_buffer)
+            except queue.Empty:
+                print("Video not found (404)")
+            # play_video(frame_buffer)
         except KeyboardInterrupt:
             disconnect(transport_t,dhcp_ip,my_ip,my_MAC)
             break

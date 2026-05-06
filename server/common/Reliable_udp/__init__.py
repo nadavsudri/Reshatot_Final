@@ -29,7 +29,6 @@ class ReliableUDP:
 
         ## send SYN message
         self.sock.sendto("SYN".encode(), self.peer_addr)
-        print("client sent syn")
         
         ## receive SYN/ACK
         self.sock.settimeout(self.timeout)
@@ -37,7 +36,6 @@ class ReliableUDP:
             data, addr = self.sock.recvfrom(1024)
             if data.decode() == "SYN/ACK":
                 self.sock.sendto("ACK".encode(), addr)
-                print("acked to the SYNack")
         except socket.timeout:
             raise ConnectionRefusedError("No SYN/ACK received from server")
         
@@ -47,30 +45,39 @@ class ReliableUDP:
 
     ## start of connection (3way handshake) - listener side
     def accept(self):
-        ## get first datagram to know who is connecting
-        data, addr = self.sock.recvfrom(1024)
-        self.peer_addr = addr 
-        
-        if data.decode() == "SYN":
-            self.sock.sendto("SYN/ACK".encode(), addr)
-            print("server acked to syn")
-            # Receive ACK
-            self.sock.settimeout(self.timeout)
-            try:
+        try:
+            # 1. Switch to blocking mode to wait for the SYN
+            # This removes Errno 35 and the need for settimeout(0)
+            self.sock.setblocking(True)
+            
+            # This will now pause here until someone actually sends a SYN
+            data, addr = self.sock.recvfrom(1024)
+            self.peer_addr = addr 
+            
+            if data.decode() == "SYN":
+                self.sock.sendto("SYN/ACK".encode(), addr)
+                print("server acked to syn")
+                
+                # 2. Use your defined timeout for the rest of the handshake
+                self.sock.settimeout(self.timeout)
+                
+                # Receive ACK
                 data, _ = self.sock.recvfrom(1024)
                 if data.decode() != "ACK":
                     return
-            except socket.timeout:
-                return
-            self.sock.settimeout(None)
-        ## receive config from the connecting side
-        self.sock.settimeout(self.timeout)
-        try:
-            config_data, _ = self.sock.recvfrom(1024)
-            self.config = json.loads(config_data.decode())
-        except socket.timeout:
-            pass
-        self.sock.settimeout(None)
+                
+                # Receive Config
+                config_data, _ = self.sock.recvfrom(1024)
+                self.config = json.loads(config_data.decode())
+                print("Connection established")
+
+        except (socket.timeout, Exception) as e:
+            print(f"Handshake failed: {e}")
+            return
+        
+        finally:
+            # 3. Switch back to non-blocking for your main loop (video/data)
+            self.sock.setblocking(False)
 
     ## finish communication (FIN/ACK) - active close
     def close(self):
@@ -80,6 +87,8 @@ class ReliableUDP:
             response, _ = self.sock.recvfrom(1024)
             if response:
                 if response.decode() == "ACK":
+                    self.sock.close()
+                    print("client sock is closed")
                     return True
         except socket.timeout:
             pass
@@ -92,6 +101,8 @@ class ReliableUDP:
             data, _ = self.sock.recvfrom(1024)
             if data.decode() == "FIN":
                 self.sock.sendto("ACK".encode(), self.peer_addr)
+                self.sock.close()
+                print("server sock is closed")
                 return True
         except socket.timeout:
             pass

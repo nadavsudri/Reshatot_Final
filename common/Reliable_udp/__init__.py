@@ -29,7 +29,6 @@ class ReliableUDP:
 
         ## send SYN message
         self.sock.sendto("SYN".encode(), self.peer_addr)
-        print("client sent syn")
         
         ## receive SYN/ACK
         self.sock.settimeout(self.timeout)
@@ -37,7 +36,6 @@ class ReliableUDP:
             data, addr = self.sock.recvfrom(1024)
             if data.decode() == "SYN/ACK":
                 self.sock.sendto("ACK".encode(), addr)
-                print("acked to the SYNack")
         except socket.timeout:
             raise ConnectionRefusedError("No SYN/ACK received from server")
         
@@ -48,6 +46,8 @@ class ReliableUDP:
     ## start of connection (3way handshake) - listener side
     def accept(self):
         ## get first datagram to know who is connecting
+        self.sock.setblocking(False)
+        self.sock.settimeout(0)
         data, addr = self.sock.recvfrom(1024)
         self.peer_addr = addr 
         
@@ -80,6 +80,7 @@ class ReliableUDP:
             response, _ = self.sock.recvfrom(1024)
             if response:
                 if response.decode() == "ACK":
+                    self.sock.close()
                     return True
         except socket.timeout:
             pass
@@ -92,6 +93,7 @@ class ReliableUDP:
             data, _ = self.sock.recvfrom(1024)
             if data.decode() == "FIN":
                 self.sock.sendto("ACK".encode(), self.peer_addr)
+                self.sock.close()
                 return True
         except socket.timeout:
             pass

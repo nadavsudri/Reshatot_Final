@@ -85,6 +85,8 @@ class RUDPTransport(Transport):
         self.rudp.close()
     def accept(self):
         self.rudp.accept()
+    def h_close(self):
+        self.rudp.handle_close()
     def flush(self):
         """Reset RUDP state between persistent requests"""
         if hasattr(self, 'rudp'):

@@ -95,17 +95,18 @@ def run_dhcp_server(server_ip : str):
                     print(f"Received Discover! MAC: {client_mac}, XID: {xid}")
                     if client_mac in leased_ips:
                         offered_ip = leased_ips[client_mac]
-                    while len(ip_pool) > 0:
-                        offered_ip = ip_pool.pop(0) 
-                        if offered_ip==server_ip:continue
-                        if  is_ip_available(offered_ip):  
-                                      #pop also eareses the ip from the pool
-                            leased_ips[client_mac] = offered_ip       #add client & ip to the list
-                            print(f"New client MAC {client_mac}! Assigned IP: {offered_ip}")
-                            break
                     else:
-                        print(f"Sorry MAC {client_mac}, no more IPs available!")
-                        continue
+                        while len(ip_pool) > 0:
+                            offered_ip = ip_pool.pop(0) 
+                            if offered_ip==server_ip:continue
+                            if  is_ip_available(offered_ip):  
+                                        #pop also eareses the ip from the pool
+                                leased_ips[client_mac] = offered_ip       #add client & ip to the list
+                                print(f"New client MAC {client_mac}! Assigned IP: {offered_ip}")
+                                break
+                        else:
+                            print(f"Sorry MAC {client_mac}, no more IPs available!")
+                        
 
                     offer_packet = create_offer_packet(xid, offered_ip, mac_padded, server_ip, dns_ip)     #creating the offer packet
                     server_socket.sendto(offer_packet, ('255.255.255.255', 6868))                  #sending the client the offer
