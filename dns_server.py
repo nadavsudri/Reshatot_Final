@@ -71,8 +71,10 @@ def run_dns_server(my_ip):
                     continue
 
                 res = parse_dns_request(packet_data)
+                print(f"request from {client_address}")
                 res_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
                 res_sock.sendto(res,client_address)
+                print(f"sent {res} to {client_address}")
                 res_sock.close()
             except KeyboardInterrupt:
     # close the socket if ctrl+c has pressed on
@@ -112,11 +114,12 @@ def encode_domain_name(domain):
     return encoded + b'\x00'
 
 def build_dns_response(transaction_id, domain_name, ip_address):
+    #0X8180- STANDART FLAGS FOR REQUEST. (1,1,0,0) - COUNTERS 1 Q 1A 0 AUTH 0 ADD
     header = struct.pack("!HHHHHH", transaction_id, 0x8180, 1, 1, 0, 0)
 
     question = encode_domain_name(domain_name) + struct.pack("!HH", 1, 1)
+    #POINTER TO THE DOMAIN IN THE ANSWER, 1,1 - CONNECTION TYPE, 60  -TTL, 4 - RD LENGTH
     answer_fixed = struct.pack("!HHHIH", 0xc00c, 1, 1, 60, 4)
-
     ip_bytes = socket.inet_aton(ip_address)
     
     return header + question + answer_fixed + ip_bytes

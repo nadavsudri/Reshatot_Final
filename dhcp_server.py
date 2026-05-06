@@ -109,7 +109,8 @@ def run_dhcp_server(server_ip : str):
                         
 
                     offer_packet = create_offer_packet(xid, offered_ip, mac_padded, server_ip, dns_ip)     #creating the offer packet
-                    server_socket.sendto(offer_packet, ('255.255.255.255', 6868))                  #sending the client the offer
+                    server_socket.sendto(offer_packet, ('255.255.255.255', 68))
+                    server_socket.sendto(offer_packet, ('255.255.255.255', 6868))                    #sending the client the offer
                     print(f"Sent DHCP Offer ({offered_ip}) back to client!\n")
 
 
@@ -119,6 +120,7 @@ def run_dhcp_server(server_ip : str):
                     if client_mac in leased_ips:
                         final_ip = leased_ips[client_mac]
                         ack_packet = create_ack_packet(xid, final_ip, mac_padded, server_ip, dns_ip)
+                        server_socket.sendto(ack_packet, ('255.255.255.255', 68))
                         server_socket.sendto(ack_packet, ('255.255.255.255', 6868))
                         print(f"Sent DHCP ACK ({final_ip}) to client.\n")
                     else:
